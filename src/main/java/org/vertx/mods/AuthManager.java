@@ -125,7 +125,7 @@ public class AuthManager extends BusModBase {
 
 		eb.send(persistorAddress, findMsg, new Handler<Message<JsonObject>>() {
 			public void handle(Message<JsonObject> reply) {
-				logger.error("Je reçois : "+reply.body);
+
 				if (reply.body.getString("status").equals("ok")) {
 					if (reply.body.getObject("result") != null) {
 
@@ -225,7 +225,7 @@ public class AuthManager extends BusModBase {
 
 		eb.send(persistorAddress, findMsg, new Handler<Message<JsonObject>>() {
 			public void handle(Message<JsonObject> reply) {
-				logger.error("Je reçois : "+reply.body);
+				
 				if (reply.body.getString("status").equals("ok")) {
 					if (reply.body.getInteger("number") > 0) {
 						sendStatus("denied", message);
