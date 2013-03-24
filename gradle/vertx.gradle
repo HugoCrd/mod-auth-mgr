@@ -68,6 +68,7 @@ repositories {
 dependencies {
   provided "io.vertx:vertx-core:$vertxVersion"
   provided "io.vertx:vertx-platform:$vertxVersion"
+  compile "org.jasypt:jasypt:1.9.0"
   testCompile "junit:junit:$junitVersion"
   testCompile "io.vertx:testtools:$toolsVersion"
 }

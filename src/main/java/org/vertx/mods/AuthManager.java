@@ -16,6 +16,7 @@
 
 package org.vertx.mods;
 
+import org.jasypt.util.password.StrongPasswordEncryptor;
 import org.vertx.java.busmods.BusModBase;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.Message;
@@ -26,167 +27,228 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Basic Authentication Manager Bus Module<p>
- * Please see the busmods manual for a full description<p>
- *
+ * Basic Authentication Manager Bus Module
+ * <p>
+ * Please see the busmods manual for a full description
+ * <p>
+ * 
  * @author <a href="http://tfox.org">Tim Fox</a>
  */
 public class AuthManager extends BusModBase {
 
-  private Handler<Message<JsonObject>> loginHandler;
-  private Handler<Message<JsonObject>> logoutHandler;
-  private Handler<Message<JsonObject>> authoriseHandler;
+	private Handler<Message<JsonObject>> loginHandler;
+	private Handler<Message<JsonObject>> logoutHandler;
+	private Handler<Message<JsonObject>> authoriseHandler;
+	private Handler<Message<JsonObject>> createHandler;
+	
 
-  protected final Map<String, String> sessions = new HashMap<>();
-  protected final Map<String, LoginInfo> logins = new HashMap<>();
+	protected final Map<String, String> sessions = new HashMap<>();
+	protected final Map<String, LoginInfo> logins = new HashMap<>();
 
-  private static final long DEFAULT_SESSION_TIMEOUT = 30 * 60 * 1000;
+	private static final long DEFAULT_SESSION_TIMEOUT = 30 * 60 * 1000;
 
-  private String address;
-  private String userCollection;
-  private String persistorAddress;
-  private long sessionTimeout;
+	private String address;
+	private String userCollection;
+	private String persistorAddress;
+	private long sessionTimeout;
 
-  private static final class LoginInfo {
-    final long timerID;
-    final String sessionID;
+	private static final class LoginInfo {
+		final long timerID;
+		final String sessionID;
 
-    private LoginInfo(long timerID, String sessionID) {
-      this.timerID = timerID;
-      this.sessionID = sessionID;
-    }
-  }
+		private LoginInfo(long timerID, String sessionID) {
+			this.timerID = timerID;
+			this.sessionID = sessionID;
+		}
+	}
 
-  /**
-   * Start the busmod
-   */
-  public void start() {
-    super.start();
+	/**
+	 * Start the busmod
+	 */
+	public void start() {
+		super.start();
 
-    this.address = getOptionalStringConfig("address", "vertx.basicauthmanager");
-    this.userCollection = getOptionalStringConfig("user_collection", "users");
-    this.persistorAddress = getOptionalStringConfig("persistor_address", "vertx.mongopersistor");
-    Number timeout = config.getNumber("session_timeout");
-    if (timeout != null) {
-      if (timeout instanceof Long) {
-        this.sessionTimeout = (Long)timeout;
-      } else if (timeout instanceof Integer) {
-        this.sessionTimeout = (Integer)timeout;
-      }
-    } else {
-      this.sessionTimeout = DEFAULT_SESSION_TIMEOUT;
-    }
+		this.address = getOptionalStringConfig("address", "vertx.basicauthmanager");
+		this.userCollection = getOptionalStringConfig("user_collection", "users");
+		this.persistorAddress = getOptionalStringConfig("persistor_address", "vertx.mongopersistor");
+		Number timeout = config.getNumber("session_timeout");
+		if (timeout != null) {
+			if (timeout instanceof Long) {
+				this.sessionTimeout = (Long) timeout;
+			} else if (timeout instanceof Integer) {
+				this.sessionTimeout = (Integer) timeout;
+			}
+		} else {
+			this.sessionTimeout = DEFAULT_SESSION_TIMEOUT;
+		}
 
-    loginHandler = new Handler<Message<JsonObject>>() {
-      public void handle(Message<JsonObject> message) {
-        doLogin(message);
-      }
-    };
-    eb.registerHandler(address + ".login", loginHandler);
-    logoutHandler = new Handler<Message<JsonObject>>() {
-      public void handle(Message<JsonObject> message) {
-        doLogout(message);
-      }
-    };
-    eb.registerHandler(address + ".logout", logoutHandler);
-    authoriseHandler = new Handler<Message<JsonObject>>() {
-      public void handle(Message<JsonObject> message) {
-        doAuthorise(message);
-      }
-    };
-    eb.registerHandler(address + ".authorise", authoriseHandler);
-  }
+		loginHandler = new Handler<Message<JsonObject>>() {
+			public void handle(Message<JsonObject> message) {
+				doLogin(message);
+			}
+		};
+		eb.registerHandler(address + ".login", loginHandler);
+		logoutHandler = new Handler<Message<JsonObject>>() {
+			public void handle(Message<JsonObject> message) {
+				doLogout(message);
+			}
+		};
+		eb.registerHandler(address + ".logout", logoutHandler);
+		authoriseHandler = new Handler<Message<JsonObject>>() {
+			public void handle(Message<JsonObject> message) {
+				doAuthorise(message);
+			}
+		};
+		eb.registerHandler(address + ".authorise", authoriseHandler);
+		createHandler = new Handler<Message<JsonObject>>() {
+			public void handle(Message<JsonObject> message) {
+				doCreate(message);
+			}
+		};
+		eb.registerHandler(address + ".create", createHandler);
+	}
 
-  private void doLogin(final Message<JsonObject> message) {
+	private void doLogin(final Message<JsonObject> message) {
 
-    final String username = getMandatoryString("username", message);
-    if (username == null) {
-      return;
-    }
-    String password = getMandatoryString("password", message);
-    if (password == null) {
-      return;
-    }
+		final String username = getMandatoryString("username", message);
+		if (username == null) {
+			return;
+		}
+		final String password = getMandatoryString("password", message);
+		if (password == null) {
+			return;
+		}
 
-    JsonObject findMsg = new JsonObject().putString("action", "findone").putString("collection", userCollection);
-    JsonObject matcher = new JsonObject().putString("username", username).putString("password", password);
-    findMsg.putObject("matcher", matcher);
+		JsonObject findMsg = new JsonObject().putString("action", "findone").putString("collection", userCollection);
+		JsonObject matcher = new JsonObject().putString("username", username);
+		findMsg.putObject("matcher", matcher);
 
-    eb.send(persistorAddress, findMsg, new Handler<Message<JsonObject>>() {
-      public void handle(Message<JsonObject> reply) {
+		eb.send(persistorAddress, findMsg, new Handler<Message<JsonObject>>() {
+			public void handle(Message<JsonObject> reply) {
+				logger.error("Je reçois : "+reply.body);
+				if (reply.body.getString("status").equals("ok")) {
+					if (reply.body.getObject("result") != null) {
 
-        if (reply.body().getString("status").equals("ok")) {
-          if (reply.body().getObject("result") != null) {
+						StrongPasswordEncryptor passwordEncryptor = new StrongPasswordEncryptor();
+						String encryptedPassword = reply.body.getObject("result").getString("password");
+						if (passwordEncryptor.checkPassword(password, encryptedPassword)) {
 
-            // Check if already logged in, if so logout of the old session
-            LoginInfo info = logins.get(username);
-            if (info != null) {
-              logout(info.sessionID);
-            }
+							// Check if already logged in, if so logout of the
+							// old session
+							LoginInfo info = logins.get(username);
+							if (info != null) {
+								logout(info.sessionID);
+							}
 
-            // Found
-            final String sessionID = UUID.randomUUID().toString();
-            long timerID = vertx.setTimer(sessionTimeout, new Handler<Long>() {
-              public void handle(Long timerID) {
-                sessions.remove(sessionID);
-                logins.remove(username);
-              }
-            });
-            sessions.put(sessionID, username);
-            logins.put(username, new LoginInfo(timerID, sessionID));
-            JsonObject jsonReply = new JsonObject().putString("sessionID", sessionID);
-            sendOK(message, jsonReply);
-          } else {
-            // Not found
-            sendStatus("denied", message);
-          }
-        } else {
-          logger.error("Failed to execute login query: " + reply.body().getString("message"));
-          sendError(message, "Failed to excecute login");
-        }
-      }
-    });
-  }
+							// Found
+							final String sessionID = UUID.randomUUID().toString();
+							long timerID = vertx.setTimer(sessionTimeout, new Handler<Long>() {
+								public void handle(Long timerID) {
+									sessions.remove(sessionID);
+									logins.remove(username);
+								}
+							});
+							sessions.put(sessionID, username);
+							logins.put(username, new LoginInfo(timerID, sessionID));
+							JsonObject jsonReply = new JsonObject().putString("sessionID", sessionID);
+							sendOK(message, jsonReply);
+						} else {
+							sendStatus("denied", message);
+						}
+					} else {
+						// Not found
+						sendStatus("denied", message);
+					}
+				} else {
+					logger.error("Failed to execute login query: " + reply.body.getString("message"));
+					sendError(message, "Failed to excecute login");
+				}
+			}
+		});
+	}
 
-  protected void doLogout(final Message<JsonObject> message) {
-    final String sessionID = getMandatoryString("sessionID", message);
-    if (sessionID != null) {
-      if (logout(sessionID)) {
-        sendOK(message);
-      } else {
-        super.sendError(message, "Not logged in");
-      }
-    }
-  }
+	protected void doLogout(final Message<JsonObject> message) {
+		final String sessionID = getMandatoryString("sessionID", message);
+		if (sessionID != null) {
+			if (logout(sessionID)) {
+				sendOK(message);
+			} else {
+				super.sendError(message, "Not logged in");
+			}
+		}
+	}
 
-  protected boolean logout(String sessionID) {
-    String username = sessions.remove(sessionID);
-    if (username != null) {
-      LoginInfo info = logins.remove(username);
-      vertx.cancelTimer(info.timerID);
-      return true;
-    } else {
-      return false;
-    }
-  }
+	protected boolean logout(String sessionID) {
+		String username = sessions.remove(sessionID);
+		if (username != null) {
+			LoginInfo info = logins.remove(username);
+			vertx.cancelTimer(info.timerID);
+			return true;
+		} else {
+			return false;
+		}
+	}
 
-  protected void doAuthorise(Message<JsonObject> message) {
-    String sessionID = getMandatoryString("sessionID", message);
-    if (sessionID == null) {
-      return;
-    }
-    String username = sessions.get(sessionID);
+	protected void doAuthorise(Message<JsonObject> message) {
+		String sessionID = getMandatoryString("sessionID", message);
+		if (sessionID == null) {
+			return;
+		}
+		String username = sessions.get(sessionID);
 
-    // In this basic auth manager we don't do any resource specific authorisation
-    // The user is always authorised if they are logged in
+		// In this basic auth manager we don't do any resource specific
+		// authorisation
+		// The user is always authorised if they are logged in
 
-    if (username != null) {
-      JsonObject reply = new JsonObject().putString("username", username);
-      sendOK(message, reply);
-    } else {
-      sendStatus("denied", message);
-    }
-  }
+		if (username != null) {
+			JsonObject reply = new JsonObject().putString("username", username);
+			sendOK(message, reply);
+		} else {
+			sendStatus("denied", message);
+		}
+	}
+	
+	private void doCreate(final Message<JsonObject> message) {
 
+		final String username = getMandatoryString("username", message);
+		if (username == null) {
+			return;
+		}
+		final String password = getMandatoryString("password", message);
+		if (password == null) {
+			return;
+		}
+
+		JsonObject findMsg = new JsonObject().putString("action", "find").putString("collection", userCollection);
+		JsonObject matcher = new JsonObject().putString("username", username);
+		findMsg.putObject("matcher", matcher);
+
+		eb.send(persistorAddress, findMsg, new Handler<Message<JsonObject>>() {
+			public void handle(Message<JsonObject> reply) {
+				logger.error("Je reçois : "+reply.body);
+				if (reply.body.getString("status").equals("ok")) {
+					if (reply.body.getInteger("number") > 0) {
+						sendStatus("denied", message);
+					} else {
+						JsonObject createMsg = new JsonObject().putString("action", "save").putString("collection", userCollection);
+						StrongPasswordEncryptor passwordEncryptor = new StrongPasswordEncryptor();
+						String encryptedPassword = passwordEncryptor.encryptPassword(password);
+						JsonObject document = new JsonObject().putString("username", username).putString("password", encryptedPassword);
+						createMsg.putElement("document", document);
+						eb.send(persistorAddress, createMsg, new Handler<Message<JsonObject>>() {
+							public void handle(Message<JsonObject> reply) {
+								if (reply.body.getString("status").equals("ok")) {
+									sendStatus("created", message);
+								}
+							}
+						});
+					}
+				} else {
+					logger.error("Failed to execute login query: " + reply.body.getString("message"));
+					sendError(message, "Failed to excecute login");
+				}
+			}
+		});
+	}
 
 }
