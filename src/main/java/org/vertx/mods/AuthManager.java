@@ -16,15 +16,15 @@
 
 package org.vertx.mods;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 import org.jasypt.util.password.StrongPasswordEncryptor;
 import org.vertx.java.busmods.BusModBase;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.json.JsonObject;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
 
 /**
  * Basic Authentication Manager Bus Module
@@ -39,8 +39,6 @@ public class AuthManager extends BusModBase {
 	private Handler<Message<JsonObject>> loginHandler;
 	private Handler<Message<JsonObject>> logoutHandler;
 	private Handler<Message<JsonObject>> authoriseHandler;
-	private Handler<Message<JsonObject>> createHandler;
-	
 
 	protected final Map<String, String> sessions = new HashMap<>();
 	protected final Map<String, LoginInfo> logins = new HashMap<>();
@@ -69,7 +67,7 @@ public class AuthManager extends BusModBase {
 		super.start();
 
 		this.address = getOptionalStringConfig("address", "vertx.basicauthmanager");
-		this.userCollection = getOptionalStringConfig("user_collection", "users");
+		this.userCollection = getOptionalStringConfig("user_collection", "User");
 		this.persistorAddress = getOptionalStringConfig("persistor_address", "vertx.mongopersistor");
 		Number timeout = config.getNumber("session_timeout");
 		if (timeout != null) {
@@ -100,18 +98,12 @@ public class AuthManager extends BusModBase {
 			}
 		};
 		eb.registerHandler(address + ".authorise", authoriseHandler);
-		createHandler = new Handler<Message<JsonObject>>() {
-			public void handle(Message<JsonObject> message) {
-				doCreate(message);
-			}
-		};
-		eb.registerHandler(address + ".create", createHandler);
 	}
 
 	private void doLogin(final Message<JsonObject> message) {
 
-		final String username = getMandatoryString("username", message);
-		if (username == null) {
+		final String email = getMandatoryString("email", message);
+		if (email == null) {
 			return;
 		}
 		final String password = getMandatoryString("password", message);
@@ -120,7 +112,7 @@ public class AuthManager extends BusModBase {
 		}
 
 		JsonObject findMsg = new JsonObject().putString("action", "findone").putString("collection", userCollection);
-		JsonObject matcher = new JsonObject().putString("username", username);
+		JsonObject matcher = new JsonObject().putString("email", email);
 		findMsg.putObject("matcher", matcher);
 
 		eb.send(persistorAddress, findMsg, new Handler<Message<JsonObject>>() {
@@ -135,7 +127,7 @@ public class AuthManager extends BusModBase {
 
 							// Check if already logged in, if so logout of the
 							// old session
-							LoginInfo info = logins.get(username);
+							LoginInfo info = logins.get(email);
 							if (info != null) {
 								logout(info.sessionID);
 							}
@@ -145,11 +137,11 @@ public class AuthManager extends BusModBase {
 							long timerID = vertx.setTimer(sessionTimeout, new Handler<Long>() {
 								public void handle(Long timerID) {
 									sessions.remove(sessionID);
-									logins.remove(username);
+									logins.remove(email);
 								}
 							});
-							sessions.put(sessionID, username);
-							logins.put(username, new LoginInfo(timerID, sessionID));
+							sessions.put(sessionID, email);
+							logins.put(email, new LoginInfo(timerID, sessionID));
 							JsonObject jsonReply = new JsonObject().putString("sessionID", sessionID);
 							sendOK(message, jsonReply);
 						} else {
@@ -179,9 +171,9 @@ public class AuthManager extends BusModBase {
 	}
 
 	protected boolean logout(String sessionID) {
-		String username = sessions.remove(sessionID);
-		if (username != null) {
-			LoginInfo info = logins.remove(username);
+		String email = sessions.remove(sessionID);
+		if (email != null) {
+			LoginInfo info = logins.remove(email);
 			vertx.cancelTimer(info.timerID);
 			return true;
 		} else {
@@ -194,61 +186,17 @@ public class AuthManager extends BusModBase {
 		if (sessionID == null) {
 			return;
 		}
-		String username = sessions.get(sessionID);
+		String email = sessions.get(sessionID);
 
 		// In this basic auth manager we don't do any resource specific
 		// authorisation
 		// The user is always authorised if they are logged in
 
-		if (username != null) {
-			JsonObject reply = new JsonObject().putString("username", username);
+		if (email != null) {
+			JsonObject reply = new JsonObject().putString("email", email);
 			sendOK(message, reply);
 		} else {
 			sendStatus("denied", message);
 		}
 	}
-	
-	private void doCreate(final Message<JsonObject> message) {
-
-		final String username = getMandatoryString("username", message);
-		if (username == null) {
-			return;
-		}
-		final String password = getMandatoryString("password", message);
-		if (password == null) {
-			return;
-		}
-
-		JsonObject findMsg = new JsonObject().putString("action", "find").putString("collection", userCollection);
-		JsonObject matcher = new JsonObject().putString("username", username);
-		findMsg.putObject("matcher", matcher);
-
-		eb.send(persistorAddress, findMsg, new Handler<Message<JsonObject>>() {
-			public void handle(Message<JsonObject> reply) {
-				
-				if (reply.body.getString("status").equals("ok")) {
-					if (reply.body.getInteger("number") > 0) {
-						sendStatus("denied", message);
-					} else {
-						JsonObject createMsg = new JsonObject().putString("action", "save").putString("collection", userCollection);
-						StrongPasswordEncryptor passwordEncryptor = new StrongPasswordEncryptor();
-						String encryptedPassword = passwordEncryptor.encryptPassword(password);
-						JsonObject document = new JsonObject().putString("username", username).putString("password", encryptedPassword);
-						createMsg.putElement("document", document);
-						eb.send(persistorAddress, createMsg, new Handler<Message<JsonObject>>() {
-							public void handle(Message<JsonObject> reply) {
-								if (reply.body.getString("status").equals("ok")) {
-									sendStatus("created", message);
-								}
-							}
-						});
-					}
-				} else {
-					logger.error("Failed to execute login query: " + reply.body.getString("message"));
-					sendError(message, "Failed to excecute login");
-				}
-			}
-		});
-	}
-
 }
