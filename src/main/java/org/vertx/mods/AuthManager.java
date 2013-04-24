@@ -40,7 +40,6 @@ public class AuthManager extends BusModBase {
 	private Handler<Message<JsonObject>> logoutHandler;
 	private Handler<Message<JsonObject>> authoriseHandler;
 
-	protected final Map<String, String> sessions = new HashMap<>();
 	protected final Map<String, LoginInfo> logins = new HashMap<>();
 
 	private static final long DEFAULT_SESSION_TIMEOUT = 30 * 60 * 1000;
@@ -65,7 +64,6 @@ public class AuthManager extends BusModBase {
 	 */
 	public void start() {
 		super.start();
-
 		this.address = getOptionalStringConfig("address", "vertx.basicauthmanager");
 		this.userCollection = getOptionalStringConfig("user_collection", "User");
 		this.persistorAddress = getOptionalStringConfig("persistor_address", "vertx.mongopersistor");
@@ -136,11 +134,11 @@ public class AuthManager extends BusModBase {
 							final String sessionID = UUID.randomUUID().toString();
 							long timerID = vertx.setTimer(sessionTimeout, new Handler<Long>() {
 								public void handle(Long timerID) {
-									sessions.remove(sessionID);
+									vertx.sharedData().getMap("sessions").remove(sessionID);
 									logins.remove(email);
 								}
 							});
-							sessions.put(sessionID, email);
+							vertx.sharedData().getMap("sessions").put(sessionID, email);
 							logins.put(email, new LoginInfo(timerID, sessionID));
 							JsonObject jsonReply = new JsonObject().putString("sessionID", sessionID);
 							sendOK(message, jsonReply);
@@ -170,7 +168,7 @@ public class AuthManager extends BusModBase {
 	}
 
 	protected boolean logout(String sessionID) {
-		String email = sessions.remove(sessionID);
+		String email = (String) vertx.sharedData().getMap("sessions").remove(sessionID);
 		if (email != null) {
 			LoginInfo info = logins.remove(email);
 			vertx.cancelTimer(info.timerID);
@@ -185,7 +183,7 @@ public class AuthManager extends BusModBase {
 		if (sessionID == null) {
 			return;
 		}
-		String email = sessions.get(sessionID);
+		String email = (String) vertx.sharedData().getMap("sessions").get(sessionID);
 
 		// In this basic auth manager we don't do any resource specific
 		// authorisation
