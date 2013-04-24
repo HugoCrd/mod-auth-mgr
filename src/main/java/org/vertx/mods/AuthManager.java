@@ -16,8 +16,7 @@
 
 package org.vertx.mods;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.io.Serializable;
 import java.util.UUID;
 
 import org.jasypt.util.password.StrongPasswordEncryptor;
@@ -25,6 +24,7 @@ import org.vertx.java.busmods.BusModBase;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.json.JsonObject;
+import org.vertx.java.core.shareddata.Shareable;
 
 /**
  * Basic Authentication Manager Bus Module
@@ -40,8 +40,6 @@ public class AuthManager extends BusModBase {
 	private Handler<Message<JsonObject>> logoutHandler;
 	private Handler<Message<JsonObject>> authoriseHandler;
 
-	protected final Map<String, LoginInfo> logins = new HashMap<>();
-
 	private static final long DEFAULT_SESSION_TIMEOUT = 30 * 60 * 1000;
 
 	private String address;
@@ -49,7 +47,9 @@ public class AuthManager extends BusModBase {
 	private String persistorAddress;
 	private long sessionTimeout;
 
-	private static final class LoginInfo {
+	private static final class LoginInfo implements Shareable{
+
+		private static final long serialVersionUID = 1L;
 		final long timerID;
 		final String sessionID;
 
@@ -125,7 +125,7 @@ public class AuthManager extends BusModBase {
 
 							// Check if already logged in, if so logout of the
 							// old session
-							LoginInfo info = logins.get(email);
+							LoginInfo info = (LoginInfo) vertx.sharedData().getMap("logins").get(email);
 							if (info != null) {
 								logout(info.sessionID);
 							}
@@ -135,11 +135,11 @@ public class AuthManager extends BusModBase {
 							long timerID = vertx.setTimer(sessionTimeout, new Handler<Long>() {
 								public void handle(Long timerID) {
 									vertx.sharedData().getMap("sessions").remove(sessionID);
-									logins.remove(email);
+									vertx.sharedData().getMap("logins").remove(email);
 								}
 							});
 							vertx.sharedData().getMap("sessions").put(sessionID, email);
-							logins.put(email, new LoginInfo(timerID, sessionID));
+							vertx.sharedData().getMap("logins").put(email, new LoginInfo(timerID, sessionID));
 							JsonObject jsonReply = new JsonObject().putString("sessionID", sessionID);
 							sendOK(message, jsonReply);
 						} else {
@@ -170,7 +170,7 @@ public class AuthManager extends BusModBase {
 	protected boolean logout(String sessionID) {
 		String email = (String) vertx.sharedData().getMap("sessions").remove(sessionID);
 		if (email != null) {
-			LoginInfo info = logins.remove(email);
+			LoginInfo info = (LoginInfo) vertx.sharedData().getMap("logins").remove(email);
 			vertx.cancelTimer(info.timerID);
 			return true;
 		} else {
