@@ -16,7 +16,6 @@
 
 package org.vertx.mods;
 
-import java.io.Serializable;
 import java.util.UUID;
 
 import org.jasypt.util.password.StrongPasswordEncryptor;
@@ -52,10 +51,12 @@ public class AuthManager extends BusModBase {
 		private static final long serialVersionUID = 1L;
 		final long timerID;
 		final String sessionID;
+		final String userID;
 
-		private LoginInfo(long timerID, String sessionID) {
+		private LoginInfo(long timerID, String sessionID, String userID) {
 			this.timerID = timerID;
 			this.sessionID = sessionID;
+			this.userID = userID;
 		}
 	}
 
@@ -138,8 +139,9 @@ public class AuthManager extends BusModBase {
 									vertx.sharedData().getMap("logins").remove(email);
 								}
 							});
+							String userID = reply.body().getObject("result").getString("_id");
 							vertx.sharedData().getMap("sessions").put(sessionID, email);
-							vertx.sharedData().getMap("logins").put(email, new LoginInfo(timerID, sessionID));
+							vertx.sharedData().getMap("logins").put(email, new LoginInfo(timerID, sessionID, userID));
 							JsonObject jsonReply = new JsonObject().putString("sessionID", sessionID);
 							sendOK(message, jsonReply);
 						} else {
@@ -184,13 +186,13 @@ public class AuthManager extends BusModBase {
 			return;
 		}
 		String email = (String) vertx.sharedData().getMap("sessions").get(sessionID);
-
 		// In this basic auth manager we don't do any resource specific
 		// authorisation
 		// The user is always authorised if they are logged in
 
 		if (email != null) {
-			JsonObject reply = new JsonObject().putString("email", email);
+			String userID = ((LoginInfo) vertx.sharedData().getMap("logins").get(email)).userID;
+			JsonObject reply = new JsonObject().putString("email", email).putString("user_id", userID);
 			sendOK(message, reply);
 		} else {
 			sendStatus("denied", message);
